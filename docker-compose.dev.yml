@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_dev:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: plclerk
+      POSTGRES_PASSWORD: plclerk_dev
+      POSTGRES_DB: plclerk
+
+volumes:
+  pgdata_dev:

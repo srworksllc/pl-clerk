@@ -5,14 +5,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Trash2, Plus, Copy } from "lucide-react";
 import { toast } from "sonner";
-import { Copy, Trash2 } from "lucide-react";
+
+interface Category {
+  id: string;
+  name: string;
+  type: "income" | "expense";
+  isDefault: boolean;
+}
 
 interface Share {
   id: string;
@@ -24,9 +36,18 @@ interface Share {
 }
 
 export default function SettingsPage() {
+  const [categories, setCategories] = useState<Category[]>([]);
   const [shares, setShares] = useState<Share[]>([]);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatType, setNewCatType] = useState<"income" | "expense">("expense");
   const [shareLabel, setShareLabel] = useState("");
   const [shareDays, setShareDays] = useState("30");
+
+  function fetchCategories() {
+    fetch("/api/categories")
+      .then((r) => r.json())
+      .then(setCategories);
+  }
 
   function fetchShares() {
     fetch("/api/share")
@@ -35,8 +56,31 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
+    fetchCategories();
     fetchShares();
   }, []);
+
+  async function handleAddCategory() {
+    if (!newCatName.trim()) return;
+    const res = await fetch("/api/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newCatName.trim(), type: newCatType }),
+    });
+    if (res.ok) {
+      toast.success("Category added");
+      setNewCatName("");
+      fetchCategories();
+    }
+  }
+
+  async function handleDeleteCategory(id: string) {
+    const res = await fetch(`/api/categories/${id}`, { method: "DELETE" });
+    if (res.ok) {
+      toast.success("Category deleted");
+      fetchCategories();
+    }
+  }
 
   async function handleCreateShare() {
     const res = await fetch("/api/share", {
@@ -47,13 +91,10 @@ export default function SettingsPage() {
         expiresInDays: parseInt(shareDays) || undefined,
       }),
     });
-
     if (res.ok) {
       toast.success("Share link created");
       setShareLabel("");
       fetchShares();
-    } else {
-      toast.error("Failed to create share link");
     }
   }
 
@@ -71,85 +112,220 @@ export default function SettingsPage() {
     toast.success("Link copied to clipboard");
   }
 
+  const expenseCategories = categories.filter((c) => c.type === "expense");
+  const incomeCategories = categories.filter((c) => c.type === "income");
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Settings</h1>
+    <>
+      <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
+        <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mx-2 data-[orientation=vertical]:h-4" />
+          <h1 className="text-base font-medium">Settings</h1>
+        </div>
+      </header>
+      <div className="flex flex-1 flex-col">
+      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+        <Tabs defaultValue="categories">
+          <TabsList>
+            <TabsTrigger value="categories">Categories</TabsTrigger>
+            <TabsTrigger value="sharing">Sharing</TabsTrigger>
+            <TabsTrigger value="account">Account</TabsTrigger>
+          </TabsList>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Accountant Access</CardTitle>
-          <CardDescription>
-            Create read-only links to share your financial data with your CPA or
-            accountant.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-4">
-            <div className="space-y-2 flex-1">
-              <Label>Label (optional)</Label>
-              <Input
-                value={shareLabel}
-                onChange={(e) => setShareLabel(e.target.value)}
-                placeholder="For my CPA"
-              />
-            </div>
-            <div className="space-y-2 w-32">
-              <Label>Expires in (days)</Label>
-              <Input
-                type="number"
-                value={shareDays}
-                onChange={(e) => setShareDays(e.target.value)}
-              />
-            </div>
-            <div className="flex items-end">
-              <Button onClick={handleCreateShare}>Create Link</Button>
-            </div>
-          </div>
-
-          {shares.length > 0 && (
-            <div className="space-y-2 mt-4">
-              {shares.map((share) => (
-                <div
-                  key={share.id}
-                  className="flex items-center justify-between rounded-md border p-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium">
-                      {share.label ?? "Shared link"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Created {new Date(share.createdAt).toLocaleDateString()}
-                      {share.expiresAt &&
-                        ` · Expires ${new Date(share.expiresAt).toLocaleDateString()}`}
-                      {!share.isActive && " · Revoked"}
-                    </p>
+          <TabsContent value="categories">
+            <div className="space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add Category</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex gap-3">
+                    <Input
+                      placeholder="Category name"
+                      value={newCatName}
+                      onChange={(e) => setNewCatName(e.target.value)}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && handleAddCategory()
+                      }
+                      className="max-w-xs"
+                    />
+                    <Select
+                      value={newCatType}
+                      onValueChange={(v) =>
+                        v && setNewCatType(v as "income" | "expense")
+                      }
+                    >
+                      <SelectTrigger className="w-[130px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="expense">Expense</SelectItem>
+                        <SelectItem value="income">Income</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button onClick={handleAddCategory}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add
+                    </Button>
                   </div>
-                  <div className="flex gap-2">
-                    {share.isActive && (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => copyShareUrl(share.token)}
-                        >
-                          <Copy className="h-4 w-4" />
-                        </Button>
+                </CardContent>
+              </Card>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Expense Categories</CardTitle>
+                      <Badge variant="secondary">
+                        {expenseCategories.length}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-1">
+                    {expenseCategories.map((cat) => (
+                      <div
+                        key={cat.id}
+                        className="flex items-center justify-between rounded-lg bg-muted/10 p-2.5"
+                      >
+                        <span className="text-sm">{cat.name}</span>
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => handleRevokeShare(share.id)}
+                          onClick={() => handleDeleteCategory(cat.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle>Income Categories</CardTitle>
+                      <Badge variant="secondary">
+                        {incomeCategories.length}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-1">
+                    {incomeCategories.map((cat) => (
+                      <div
+                        key={cat.id}
+                        className="flex items-center justify-between rounded-lg bg-muted/10 p-2.5"
+                      >
+                        <span className="text-sm">{cat.name}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteCategory(cat.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          </TabsContent>
+
+          <TabsContent value="sharing">
+            <Card>
+              <CardHeader>
+                <CardTitle>Accountant Access</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Create read-only links to share your financial data.
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="flex gap-3">
+                  <Input
+                    value={shareLabel}
+                    onChange={(e) => setShareLabel(e.target.value)}
+                    placeholder="Label (e.g. For my CPA)"
+                    className="max-w-xs"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Label className="whitespace-nowrap text-sm">
+                      Expires in
+                    </Label>
+                    <Input
+                      type="number"
+                      value={shareDays}
+                      onChange={(e) => setShareDays(e.target.value)}
+                      className="w-20"
+                    />
+                    <span className="text-sm text-muted-foreground">days</span>
+                  </div>
+                  <Button onClick={handleCreateShare}>Create Link</Button>
+                </div>
+
+                {shares.length > 0 && (
+                  <>
+                    <Separator className="my-4" />
+                    <div className="space-y-2">
+                      {shares.map((share) => (
+                        <div
+                          key={share.id}
+                          className="flex items-center justify-between rounded-lg bg-muted/10 p-3"
+                        >
+                          <div>
+                            <p className="text-sm font-medium">
+                              {share.label ?? "Shared link"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Created{" "}
+                              {new Date(share.createdAt).toLocaleDateString()}
+                              {share.expiresAt &&
+                                ` · Expires ${new Date(share.expiresAt).toLocaleDateString()}`}
+                              {!share.isActive && " · Revoked"}
+                            </p>
+                          </div>
+                          {share.isActive && (
+                            <div className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                onClick={() => copyShareUrl(share.token)}
+                              >
+                                <Copy className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleRevokeShare(share.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="account">
+            <Card>
+              <CardHeader>
+                <CardTitle>Account</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Account settings coming soon.
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+      </div>
+    </>
   );
 }

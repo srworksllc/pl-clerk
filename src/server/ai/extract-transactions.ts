@@ -1,5 +1,6 @@
-import { anthropic, openai } from "./providers";
+import { callOpenAI } from "./providers";
 import { EXTRACTION_SYSTEM_PROMPT } from "./prompts";
+import type { PdfPage } from "@/lib/pdf";
 
 interface ExtractedTransaction {
   date: Date;
@@ -9,62 +10,40 @@ interface ExtractedTransaction {
   rawText: string;
 }
 
-export async function extractTransactions(
-  pdfText: string
+export async function extractTransactionsFromPages(
+  pages: PdfPage[]
 ): Promise<ExtractedTransaction[]> {
-  try {
-    return await extractWithClaude(pdfText);
-  } catch {
-    return await extractWithOpenAI(pdfText);
+  const allTransactions: ExtractedTransaction[] = [];
+
+  for (const page of pages) {
+    console.log(`[extract] Processing page ${page.pageNumber} (${page.text.length} chars)`);
+
+    const text = await callOpenAI(
+      [
+        { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: `Extract transactions from this bank statement page:\n\n${page.text}`,
+        },
+      ],
+      { maxTokens: 4096 }
+    );
+
+    const parsed = parseExtractionResponse(text);
+    console.log(`[extract] Page ${page.pageNumber}: ${parsed.length} transactions`);
+    allTransactions.push(...parsed);
   }
-}
 
-async function extractWithClaude(
-  pdfText: string
-): Promise<ExtractedTransaction[]> {
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 8192,
-    system: EXTRACTION_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Extract all transactions from this bank statement:\n\n${pdfText}`,
-      },
-    ],
-  });
-
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "";
-  return parseExtractionResponse(text);
-}
-
-async function extractWithOpenAI(
-  pdfText: string
-): Promise<ExtractedTransaction[]> {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 8192,
-    messages: [
-      { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: `Extract all transactions from this bank statement:\n\n${pdfText}`,
-      },
-    ],
-    response_format: { type: "json_object" },
-  });
-
-  const text = response.choices[0]?.message?.content ?? "[]";
-  return parseExtractionResponse(text);
+  return allTransactions;
 }
 
 function parseExtractionResponse(text: string): ExtractedTransaction[] {
-  // Strip markdown code fences if present
   const cleaned = text
     .replace(/```json\n?/g, "")
     .replace(/```\n?/g, "")
     .trim();
+
+  if (!cleaned || cleaned === "[]") return [];
 
   const parsed = JSON.parse(cleaned);
   const items = Array.isArray(parsed) ? parsed : parsed.transactions ?? [];
@@ -75,8 +54,6 @@ function parseExtractionResponse(text: string): ExtractedTransaction[] {
       description: string;
       amount: number | string;
       type: string;
-      rawText?: string;
-      raw_text?: string;
     }) => ({
       date: new Date(item.date),
       description: item.description,
@@ -86,7 +63,7 @@ function parseExtractionResponse(text: string): ExtractedTransaction[] {
           : item.amount
       ),
       type: item.type === "income" ? "income" : "expense",
-      rawText: item.rawText ?? item.raw_text ?? "",
+      rawText: "",
     })
   );
 }

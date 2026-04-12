@@ -77,52 +77,46 @@ export default function SharedViewPage() {
     .reduce((sum, t) => sum + parseFloat(t.amount), 0);
 
   return (
-    <div className="min-h-screen bg-muted p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <div className="min-h-screen bg-muted p-4 md:p-6">
+      <div className="mx-auto max-w-5xl flex flex-col gap-4 md:gap-6">
         <div>
-          <h1 className="text-2xl font-bold">P&L Clerk — Shared View</h1>
-          <p className="text-muted-foreground">Read-only access</p>
+          <h1 className="text-base font-medium">P&L Clerk — Shared View</h1>
+          <p className="text-sm text-muted-foreground">Read-only access</p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Total Income</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-green-600">
+            <CardHeader>
+              <CardDescription>Total Income</CardDescription>
+              <CardTitle className="text-2xl font-semibold tabular-nums text-green-600">
                 ${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-              </p>
-            </CardContent>
+              </CardTitle>
+            </CardHeader>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Total Expenses</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-red-600">
+            <CardHeader>
+              <CardDescription>Total Expenses</CardDescription>
+              <CardTitle className="text-2xl font-semibold tabular-nums text-red-600">
                 ${totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-              </p>
-            </CardContent>
+              </CardTitle>
+            </CardHeader>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Net Income</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className={`text-2xl font-bold ${totalIncome - totalExpenses >= 0 ? "text-green-600" : "text-red-600"}`}>
+            <CardHeader>
+              <CardDescription>Net Income</CardDescription>
+              <CardTitle className={`text-2xl font-semibold tabular-nums ${totalIncome - totalExpenses >= 0 ? "text-green-600" : "text-red-600"}`}>
                 ${(totalIncome - totalExpenses).toLocaleString("en-US", { minimumFractionDigits: 2 })}
-              </p>
-            </CardContent>
+              </CardTitle>
+            </CardHeader>
           </Card>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>All Transactions</CardTitle>
-            <CardDescription>
+            <CardDescription>All Transactions</CardDescription>
+            <CardTitle className="text-base">
               {data.transactions.length} transactions
-            </CardDescription>
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -145,7 +139,7 @@ export default function SharedViewPage() {
                     <TableCell>{txn.vendor?.name ?? "—"}</TableCell>
                     <TableCell>{txn.category?.name ?? "Uncategorized"}</TableCell>
                     <TableCell
-                      className={`text-right font-medium ${
+                      className={`text-right font-medium tabular-nums ${
                         txn.type === "income" ? "text-green-600" : "text-red-600"
                       }`}
                     >

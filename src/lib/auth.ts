@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { seedCategories } from "@/db/seed";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
@@ -22,6 +23,15 @@ export const auth = betterAuth({
       companyName: {
         type: "string",
         required: false,
+      },
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user) => {
+          await seedCategories(user.id);
+        },
       },
     },
   },

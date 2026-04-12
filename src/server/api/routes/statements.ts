@@ -1,13 +1,11 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
-import { z } from "zod";
 import { db } from "@/db";
 import { statements, transactions } from "@/db/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { saveFile, deleteFile } from "@/server/storage/local";
-import { extractTextFromPdf } from "@/lib/pdf";
-import { extractTransactions } from "@/server/ai/extract-transactions";
-import { categorizeTransactions } from "@/server/ai/categorize";
+import { extractPagesFromPdf } from "@/lib/pdf";
+import { extractTransactionsFromPages } from "@/server/ai/extract-transactions";
+import { categorizeInMemory, createVendorRules } from "@/server/ai/categorize";
 
 type Env = { Variables: { userId: string } };
 
@@ -99,56 +97,110 @@ export const statementsRoute = new Hono<Env>()
       .set({ status: "processing" })
       .where(eq(statements.id, id));
 
-    try {
-      const pdfText = await extractTextFromPdf(row.filePath);
-      const extracted = await extractTransactions(pdfText);
+    // Process in background — don't block the response
+    processStatement(userId, id, row.filePath).catch((err) => {
+      console.error("[process] Background processing failed:", err);
+    });
 
-      await db
-        .update(statements)
-        .set({
-          status: "extracted",
-          transactionCount: extracted.length,
-          periodStart: extracted.length > 0 ? extracted[0].date : null,
-          periodEnd:
-            extracted.length > 0
-              ? extracted[extracted.length - 1].date
-              : null,
-        })
-        .where(eq(statements.id, id));
+    return c.json({ success: true });
+  });
 
-      const txnRows = extracted.map((t) => ({
+async function processStatement(
+  userId: string,
+  statementId: string,
+  filePath: string
+) {
+  async function setStep(step: string) {
+    console.log(`[process] Step: ${step}`);
+    await db
+      .update(statements)
+      .set({ processingStep: step })
+      .where(eq(statements.id, statementId));
+  }
+
+  try {
+    // Step 1: Read file
+    await setStep("reading");
+    const pages = await extractPagesFromPdf(filePath);
+    console.log("[process] Found", pages.length, "pages with content");
+
+    if (pages.length === 0) {
+      throw new Error("No readable content found in PDF");
+    }
+
+    // Step 2: Extract transactions
+    await setStep("extracting");
+    const extracted = await extractTransactionsFromPages(pages);
+    console.log("[process] Total extracted:", extracted.length, "transactions");
+
+    if (extracted.length === 0) {
+      throw new Error("No transactions found in statement");
+    }
+
+    // Step 3: Match vendors
+    await setStep("matching");
+    const inputs = extracted.map((t, i) => ({
+      description: t.description,
+      index: i,
+    }));
+
+    // Step 4: Categorize
+    await setStep("categorizing");
+    const categoryResults = await categorizeInMemory(userId, inputs);
+
+    const catMap = new Map<number, { categoryId: string | null; vendorName: string | null }>();
+    for (const r of categoryResults) {
+      catMap.set(r.index, { categoryId: r.categoryId, vendorName: r.vendorName });
+    }
+
+    // Step 5: Save everything atomically
+    await setStep("saving");
+    extracted.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    const txnRows = extracted.map((t, i) => {
+      const cat = catMap.get(i);
+      return {
         userId,
-        statementId: id,
+        statementId,
         date: t.date,
         description: t.description,
         amount: t.amount.toString(),
         type: t.type as "income" | "expense",
         rawText: t.rawText,
-      }));
+        categoryId: cat?.categoryId ?? null,
+      };
+    });
 
-      if (txnRows.length > 0) {
-        await db.insert(transactions).values(txnRows);
-      }
+    const inserted = await db.insert(transactions).values(txnRows).returning();
 
-      const insertedTxns = await db.query.transactions.findMany({
-        where: eq(transactions.statementId, id),
-      });
+    const vendorData = inserted.map((row, i) => ({
+      id: row.id,
+      description: row.description,
+      categoryId: row.categoryId,
+      vendorName: catMap.get(i)?.vendorName ?? null,
+    }));
+    await createVendorRules(userId, vendorData);
 
-      await categorizeTransactions(userId, insertedTxns);
+    // Done
+    await db
+      .update(statements)
+      .set({
+        status: "categorized",
+        processingStep: null,
+        transactionCount: extracted.length,
+        periodStart: extracted[0].date,
+        periodEnd: extracted[extracted.length - 1].date,
+      })
+      .where(eq(statements.id, statementId));
 
-      await db
-        .update(statements)
-        .set({ status: "categorized" })
-        .where(eq(statements.id, id));
+    console.log("[process] Done!", statementId, ":", extracted.length, "transactions");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Processing failed";
+    console.error("[process] Error:", message);
 
-      return c.json({ success: true, transactionCount: extracted.length });
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Processing failed";
-      await db
-        .update(statements)
-        .set({ status: "error", errorMessage: message })
-        .where(eq(statements.id, id));
-      return c.json({ error: message }, 500);
-    }
-  });
+    await db
+      .update(statements)
+      .set({ status: "error", processingStep: null, errorMessage: message })
+      .where(eq(statements.id, statementId));
+  }
+}

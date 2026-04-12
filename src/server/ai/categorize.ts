@@ -1,4 +1,4 @@
-import { anthropic, openai } from "./providers";
+import { callClaude } from "./providers";
 import { CATEGORIZATION_SYSTEM_PROMPT } from "./prompts";
 import { db } from "@/db";
 import {
@@ -8,25 +8,25 @@ import {
   vendorCategoryRules,
   transactions,
 } from "@/db/schema";
-import { eq, and, ilike } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
+import { lookupGlobalVendor, recordGlobalVote } from "./global-vendors";
 
-interface TransactionRow {
-  id: string;
+interface TransactionInput {
   description: string;
-  categoryId: string | null;
-  categoryManuallySet: boolean;
-  vendorId: string | null;
+  index: number;
 }
 
-export async function categorizeTransactions(
-  userId: string,
-  txns: TransactionRow[]
-) {
-  // Skip already manually categorized transactions
-  const uncategorized = txns.filter((t) => !t.categoryManuallySet);
-  if (uncategorized.length === 0) return;
+interface CategoryResult {
+  index: number;
+  categoryId: string | null;
+  vendorName: string | null;
+}
 
-  // Load user's vendor rules and category rules
+// In-memory categorization — returns category assignments without touching DB
+export async function categorizeInMemory(
+  userId: string,
+  txns: TransactionInput[]
+): Promise<CategoryResult[]> {
   const userVendorRules = await db.query.vendorRules.findMany({
     where: eq(vendorRules.userId, userId),
     with: { vendor: true },
@@ -41,102 +41,211 @@ export async function categorizeTransactions(
   });
 
   const categoryNames = userCategories.map((c) => c.name);
+  const results: CategoryResult[] = [];
+  const needsGlobal: TransactionInput[] = [];
 
-  // First pass: apply vendor rules (deterministic)
-  const needsAi: TransactionRow[] = [];
-
-  for (const txn of uncategorized) {
+  // Pass 1: User's personal vendor rules (always wins)
+  for (const txn of txns) {
     const matchedRule = userVendorRules.find((rule) =>
       txn.description.toUpperCase().includes(rule.pattern.toUpperCase())
     );
 
     if (matchedRule) {
-      // Check if there's a category override for this vendor
       const catRule = userCategoryRules.find(
         (cr) => cr.vendorId === matchedRule.vendorId
       );
-
-      await db
-        .update(transactions)
-        .set({
-          vendorId: matchedRule.vendorId,
-          categoryId: catRule?.categoryId ?? matchedRule.vendor.defaultCategoryId,
-          updatedAt: new Date(),
-        })
-        .where(eq(transactions.id, txn.id));
+      results.push({
+        index: txn.index,
+        categoryId: catRule?.categoryId ?? matchedRule.vendor.defaultCategoryId,
+        vendorName: matchedRule.vendor.name,
+      });
     } else {
-      needsAi.push(txn);
+      needsGlobal.push(txn);
     }
   }
 
-  if (needsAi.length === 0) return;
+  if (needsGlobal.length === 0) return results;
 
-  // Second pass: AI categorization for remaining
-  const txnData = needsAi.map((t) => ({
-    id: t.id,
+  // Pass 2: Global vendor database (collective intelligence)
+  const needsAi: TransactionInput[] = [];
+  for (const txn of needsGlobal) {
+    const globalCategoryName = await lookupGlobalVendor(txn.description);
+
+    if (globalCategoryName) {
+      const category = userCategories.find(
+        (c) => c.name.toLowerCase() === globalCategoryName.toLowerCase()
+      );
+      if (category) {
+        console.log(`[categorize] Global DB match: "${txn.description}" → ${globalCategoryName}`);
+        results.push({
+          index: txn.index,
+          categoryId: category.id,
+          vendorName: null,
+        });
+        continue;
+      }
+    }
+    needsAi.push(txn);
+  }
+
+  if (needsAi.length === 0) return results;
+
+  // Pass 3: AI categorization in batches (fallback)
+  console.log(`[categorize] ${needsAi.length} transactions need AI (${txns.length - needsAi.length} resolved by rules/global)`);
+  const BATCH_SIZE = 30;
+  for (let i = 0; i < needsAi.length; i += BATCH_SIZE) {
+    const batch = needsAi.slice(i, i + BATCH_SIZE);
+    const txnData = batch.map((t) => ({
+      id: String(t.index),
+      description: t.description,
+    }));
+
+    console.log(
+      `[categorize] AI batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} transactions`
+    );
+
+    try {
+      const text = await callClaude(
+        [
+          {
+            role: "user",
+            content: `Categories: ${categoryNames.join(", ")}\n\nTransactions:\n${JSON.stringify(txnData)}`,
+          },
+        ],
+        {
+          system: CATEGORIZATION_SYSTEM_PROMPT,
+          maxTokens: 4096,
+          model: "claude-haiku-4-5-20251001",
+        }
+      );
+
+      const parsed = parseCategorizeResponse(text);
+
+      for (const item of parsed) {
+        if (!item.categoryName) {
+          results.push({
+            index: parseInt(item.transactionId),
+            categoryId: null,
+            vendorName: item.vendorName || null,
+          });
+          continue;
+        }
+
+        const category = userCategories.find(
+          (c) => c.name.toLowerCase() === item.categoryName!.toLowerCase()
+        );
+
+        results.push({
+          index: parseInt(item.transactionId),
+          categoryId: category?.id ?? null,
+          vendorName: item.vendorName || null,
+        });
+      }
+    } catch (err) {
+      console.error("[categorize] Batch failed:", err);
+      for (const t of batch) {
+        results.push({ index: t.index, categoryId: null, vendorName: null });
+      }
+    }
+  }
+
+  return results;
+}
+
+// Post-insert: create vendors, vendor rules, and record global votes
+export async function createVendorRules(
+  userId: string,
+  txns: Array<{
+    id: string;
+    description: string;
+    categoryId: string | null;
+    vendorName: string | null;
+  }>
+) {
+  for (const txn of txns) {
+    if (!txn.vendorName) continue;
+
+    let vendor = await db.query.vendors.findFirst({
+      where: and(eq(vendors.userId, userId), eq(vendors.name, txn.vendorName)),
+    });
+
+    if (!vendor) {
+      const [created] = await db
+        .insert(vendors)
+        .values({
+          userId,
+          name: txn.vendorName,
+          defaultCategoryId: txn.categoryId,
+        })
+        .returning();
+      vendor = created;
+
+      await db.insert(vendorRules).values({
+        userId,
+        vendorId: vendor.id,
+        pattern: txn.description.toUpperCase().slice(0, 30),
+      });
+    }
+
+    await db
+      .update(transactions)
+      .set({ vendorId: vendor.id })
+      .where(eq(transactions.id, txn.id));
+
+    // Record global vote if categorized
+    if (txn.categoryId) {
+      const cat = await db.query.categories.findFirst({
+        where: eq(categories.id, txn.categoryId),
+      });
+      if (cat) {
+        await recordGlobalVote(txn.vendorName, cat.name);
+      }
+    }
+  }
+}
+
+// DB-based categorization for re-categorizing existing transactions
+export async function categorizeTransactions(
+  userId: string,
+  txns: {
+    id: string;
+    description: string;
+    categoryId: string | null;
+    categoryManuallySet: boolean;
+    vendorId: string | null;
+  }[]
+) {
+  const uncategorized = txns.filter(
+    (t) => !t.categoryManuallySet && !t.categoryId
+  );
+  if (uncategorized.length === 0) return;
+
+  const inputs = uncategorized.map((t, i) => ({
     description: t.description,
+    index: i,
   }));
 
-  try {
-    const results = await categorizeWithClaude(txnData, categoryNames);
-    await applyCategorizationResults(userId, results, userCategories);
-  } catch {
-    try {
-      const results = await categorizeWithOpenAI(txnData, categoryNames);
-      await applyCategorizationResults(userId, results, userCategories);
-    } catch {
-      // If both fail, leave uncategorized
-    }
+  const results = await categorizeInMemory(userId, inputs);
+
+  for (const result of results) {
+    const txn = uncategorized[result.index];
+    if (!txn || !result.categoryId) continue;
+
+    await db
+      .update(transactions)
+      .set({
+        categoryId: result.categoryId,
+        updatedAt: new Date(),
+      })
+      .where(eq(transactions.id, txn.id));
   }
 }
 
 interface CategorizationResult {
   transactionId: string;
-  categoryName: string;
+  categoryName: string | null;
   vendorName: string;
   confidence: number;
-}
-
-async function categorizeWithClaude(
-  txns: { id: string; description: string }[],
-  categoryNames: string[]
-): Promise<CategorizationResult[]> {
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 4096,
-    system: CATEGORIZATION_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: "user",
-        content: `Categories: ${categoryNames.join(", ")}\n\nTransactions:\n${JSON.stringify(txns, null, 2)}`,
-      },
-    ],
-  });
-
-  const text =
-    response.content[0].type === "text" ? response.content[0].text : "[]";
-  return parseCategorizeResponse(text);
-}
-
-async function categorizeWithOpenAI(
-  txns: { id: string; description: string }[],
-  categoryNames: string[]
-): Promise<CategorizationResult[]> {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    max_tokens: 4096,
-    messages: [
-      { role: "system", content: CATEGORIZATION_SYSTEM_PROMPT },
-      {
-        role: "user",
-        content: `Categories: ${categoryNames.join(", ")}\n\nTransactions:\n${JSON.stringify(txns, null, 2)}`,
-      },
-    ],
-    response_format: { type: "json_object" },
-  });
-
-  const text = response.choices[0]?.message?.content ?? "[]";
-  return parseCategorizeResponse(text);
 }
 
 function parseCategorizeResponse(text: string): CategorizationResult[] {
@@ -145,63 +254,7 @@ function parseCategorizeResponse(text: string): CategorizationResult[] {
     .replace(/```\n?/g, "")
     .trim();
   const parsed = JSON.parse(cleaned);
-  return Array.isArray(parsed) ? parsed : parsed.results ?? parsed.categorizations ?? [];
-}
-
-async function applyCategorizationResults(
-  userId: string,
-  results: CategorizationResult[],
-  userCategories: { id: string; name: string }[]
-) {
-  for (const result of results) {
-    const category = userCategories.find(
-      (c) => c.name.toLowerCase() === result.categoryName.toLowerCase()
-    );
-
-    if (!category) continue;
-
-    // Find or create vendor
-    let vendor = await db.query.vendors.findFirst({
-      where: and(
-        eq(vendors.userId, userId),
-        eq(vendors.name, result.vendorName)
-      ),
-    });
-
-    if (!vendor && result.vendorName) {
-      const [created] = await db
-        .insert(vendors)
-        .values({
-          userId,
-          name: result.vendorName,
-          defaultCategoryId: category.id,
-        })
-        .returning();
-      vendor = created;
-
-      // Create vendor rule from the transaction description
-      const txn = await db.query.transactions.findFirst({
-        where: eq(transactions.id, result.transactionId),
-      });
-
-      if (txn) {
-        await db.insert(vendorRules).values({
-          userId,
-          vendorId: vendor.id,
-          pattern: txn.description.toUpperCase().slice(0, 30),
-        });
-      }
-    }
-
-    // Update the transaction
-    await db
-      .update(transactions)
-      .set({
-        categoryId: category.id,
-        vendorId: vendor?.id ?? null,
-        aiCategoryConfidence: result.confidence.toString(),
-        updatedAt: new Date(),
-      })
-      .where(eq(transactions.id, result.transactionId));
-  }
+  return Array.isArray(parsed)
+    ? parsed
+    : parsed.results ?? parsed.categorizations ?? [];
 }

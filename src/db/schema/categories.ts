@@ -17,10 +17,10 @@ export const categories = pgTable("categories", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
-  type: text("type", { enum: ["income", "expense"] })
+  type: text("type", { enum: ["income", "cogs", "expense"] })
     .notNull()
     .default("expense"),
-  parentId: text("parent_id"),
+  taxLine: text("tax_line"),
   isDefault: boolean("is_default").notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -29,8 +29,4 @@ export const categories = pgTable("categories", {
 
 export const categoriesRelations = relations(categories, ({ one }) => ({
   user: one(user, { fields: [categories.userId], references: [user.id] }),
-  parent: one(categories, {
-    fields: [categories.parentId],
-    references: [categories.id],
-  }),
 }));

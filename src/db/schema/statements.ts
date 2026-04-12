@@ -53,6 +53,7 @@ export const statements = pgTable("statements", {
     .notNull()
     .default("uploaded"),
   transactionCount: integer("transaction_count").default(0),
+  processingStep: text("processing_step"),
   errorMessage: text("error_message"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

@@ -1,151 +1,149 @@
 import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
-import { z } from "zod";
 import { db } from "@/db";
-import { reports, transactions, categories } from "@/db/schema";
-import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
+import { transactions } from "@/db/schema";
+import { eq, and, gte, lte } from "drizzle-orm";
 import { generateExcel, generateCsv } from "@/lib/export";
 
 type Env = { Variables: { userId: string } };
 
-export const reportsRoute = new Hono<Env>()
-  .get("/", async (c) => {
-    const userId = c.get("userId");
-    const rows = await db.query.reports.findMany({
-      where: eq(reports.userId, userId),
-      orderBy: desc(reports.createdAt),
-    });
-    return c.json(rows);
-  })
+interface PLData {
+  periodStart: string;
+  periodEnd: string;
+  incomeByCategory: Record<string, number>;
+  cogsByCategory: Record<string, number>;
+  expenseByCategory: Record<string, number>;
+  totalIncome: number;
+  totalCogs: number;
+  grossProfit: number;
+  totalExpenses: number;
+  netProfit: number;
+  transactionCount: number;
+  uncategorizedCount: number;
+}
 
-  .post(
-    "/generate",
-    zValidator(
-      "json",
-      z.object({
-        name: z.string().min(1),
-        type: z.enum(["monthly_pl", "quarterly_pl", "annual_pl", "custom"]),
-        periodStart: z.string(),
-        periodEnd: z.string(),
-      })
-    ),
-    async (c) => {
-      const userId = c.get("userId");
-      const body = c.req.valid("json");
-      const start = new Date(body.periodStart);
-      const end = new Date(body.periodEnd);
+function buildPLData(
+  txns: {
+    amount: string;
+    type: string;
+    categoryId: string | null;
+    category: { name: string; type: string; taxLine: string | null } | null;
+  }[],
+  startDate: string,
+  endDate: string
+): PLData {
+  const incomeByCategory: Record<string, number> = {};
+  const cogsByCategory: Record<string, number> = {};
+  const expenseByCategory: Record<string, number> = {};
+  let totalIncome = 0;
+  let totalCogs = 0;
+  let totalExpenses = 0;
+  let uncategorizedCount = 0;
 
-      // Fetch transactions in range
-      const txns = await db.query.transactions.findMany({
-        where: and(
-          eq(transactions.userId, userId),
-          gte(transactions.date, start),
-          lte(transactions.date, end)
-        ),
-        with: { category: true, vendor: true },
-        orderBy: transactions.date,
-      });
+  for (const txn of txns) {
+    const amount = parseFloat(txn.amount);
 
-      // Build P&L data
-      const incomeByCategory: Record<string, number> = {};
-      const expenseByCategory: Record<string, number> = {};
-      let totalIncome = 0;
-      let totalExpenses = 0;
-
-      for (const txn of txns) {
-        const categoryName = txn.category?.name ?? "Uncategorized";
-        const amount = parseFloat(txn.amount);
-
-        if (txn.type === "income") {
-          incomeByCategory[categoryName] =
-            (incomeByCategory[categoryName] ?? 0) + amount;
-          totalIncome += amount;
-        } else {
-          expenseByCategory[categoryName] =
-            (expenseByCategory[categoryName] ?? 0) + amount;
-          totalExpenses += amount;
-        }
-      }
-
-      const data = {
-        periodStart: body.periodStart,
-        periodEnd: body.periodEnd,
-        totalIncome,
-        totalExpenses,
-        netIncome: totalIncome - totalExpenses,
-        incomeByCategory,
-        expenseByCategory,
-        transactionCount: txns.length,
-      };
-
-      const [row] = await db
-        .insert(reports)
-        .values({
-          userId,
-          name: body.name,
-          type: body.type,
-          periodStart: start,
-          periodEnd: end,
-          data,
-        })
-        .returning();
-
-      return c.json(row, 201);
+    if (!txn.category) {
+      uncategorizedCount++;
+      if (txn.type === "income") totalIncome += amount;
+      else totalExpenses += amount;
+      const bucket = txn.type === "income" ? incomeByCategory : expenseByCategory;
+      bucket["Uncategorized"] = (bucket["Uncategorized"] ?? 0) + amount;
+      continue;
     }
-  )
 
-  .get("/:id", async (c) => {
+    const categoryName = txn.category.name;
+    const categoryType = txn.category.type;
+
+    if (categoryType === "income") {
+      incomeByCategory[categoryName] = (incomeByCategory[categoryName] ?? 0) + amount;
+      totalIncome += amount;
+    } else if (categoryType === "cogs") {
+      cogsByCategory[categoryName] = (cogsByCategory[categoryName] ?? 0) + amount;
+      totalCogs += amount;
+    } else {
+      expenseByCategory[categoryName] = (expenseByCategory[categoryName] ?? 0) + amount;
+      totalExpenses += amount;
+    }
+  }
+
+  return {
+    periodStart: startDate,
+    periodEnd: endDate,
+    incomeByCategory,
+    cogsByCategory,
+    expenseByCategory,
+    totalIncome,
+    totalCogs,
+    grossProfit: totalIncome - totalCogs,
+    totalExpenses,
+    netProfit: totalIncome - totalCogs - totalExpenses,
+    transactionCount: txns.length,
+    uncategorizedCount,
+  };
+}
+
+export const reportsRoute = new Hono<Env>()
+  .get("/live", async (c) => {
     const userId = c.get("userId");
-    const id = c.req.param("id");
+    const startDate = c.req.query("startDate");
+    const endDate = c.req.query("endDate");
 
-    const row = await db.query.reports.findFirst({
-      where: and(eq(reports.id, id), eq(reports.userId, userId)),
+    if (!startDate || !endDate) {
+      return c.json({ error: "startDate and endDate required" }, 400);
+    }
+
+    const txns = await db.query.transactions.findMany({
+      where: and(
+        eq(transactions.userId, userId),
+        gte(transactions.date, new Date(startDate)),
+        lte(transactions.date, new Date(endDate))
+      ),
+      with: { category: true },
     });
 
-    if (!row) return c.json({ error: "Not found" }, 404);
-    return c.json(row);
+    return c.json(buildPLData(txns, startDate, endDate));
   })
 
-  .get("/:id/export", async (c) => {
+  .get("/export", async (c) => {
     const userId = c.get("userId");
-    const id = c.req.param("id");
+    const startDate = c.req.query("startDate");
+    const endDate = c.req.query("endDate");
     const format = c.req.query("format") ?? "xlsx";
 
-    const row = await db.query.reports.findFirst({
-      where: and(eq(reports.id, id), eq(reports.userId, userId)),
+    if (!startDate || !endDate) {
+      return c.json({ error: "startDate and endDate required" }, 400);
+    }
+
+    const txns = await db.query.transactions.findMany({
+      where: and(
+        eq(transactions.userId, userId),
+        gte(transactions.date, new Date(startDate)),
+        lte(transactions.date, new Date(endDate))
+      ),
+      with: { category: true },
     });
 
-    if (!row) return c.json({ error: "Not found" }, 404);
+    const data = buildPLData(txns, startDate, endDate);
+    const fileName = `PL-${startDate}-to-${endDate}`;
 
     if (format === "csv") {
-      const csv = generateCsv(row.data as Record<string, unknown>);
+      const csv = generateCsv(data as unknown as Record<string, unknown>);
       return new Response(csv, {
         headers: {
           "Content-Type": "text/csv",
-          "Content-Disposition": `attachment; filename="${row.name}.csv"`,
+          "Content-Disposition": `attachment; filename="${fileName}.csv"`,
         },
       });
     }
 
-    const buffer = await generateExcel(row.data as Record<string, unknown>);
+    const buffer = await generateExcel(
+      data as unknown as Record<string, unknown>
+    );
     return new Response(new Uint8Array(buffer), {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "Content-Disposition": `attachment; filename="${row.name}.xlsx"`,
+        "Content-Disposition": `attachment; filename="${fileName}.xlsx"`,
       },
     });
-  })
-
-  .delete("/:id", async (c) => {
-    const userId = c.get("userId");
-    const id = c.req.param("id");
-
-    const deleted = await db
-      .delete(reports)
-      .where(and(eq(reports.id, id), eq(reports.userId, userId)))
-      .returning();
-
-    if (deleted.length === 0) return c.json({ error: "Not found" }, 404);
-    return c.json({ success: true });
   });

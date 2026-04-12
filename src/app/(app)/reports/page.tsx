@@ -2,8 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -11,82 +9,102 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Download, BarChart3, Trash2 } from "lucide-react";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Download, Share2 } from "lucide-react";
 import { toast } from "sonner";
 
-interface Report {
-  id: string;
-  name: string;
-  type: string;
+interface PLData {
   periodStart: string;
   periodEnd: string;
-  data: {
-    totalIncome: number;
-    totalExpenses: number;
-    netIncome: number;
-    incomeByCategory: Record<string, number>;
-    expenseByCategory: Record<string, number>;
-    transactionCount: number;
+  incomeByCategory: Record<string, number>;
+  cogsByCategory: Record<string, number>;
+  expenseByCategory: Record<string, number>;
+  totalIncome: number;
+  totalCogs: number;
+  grossProfit: number;
+  totalExpenses: number;
+  netProfit: number;
+  transactionCount: number;
+  uncategorizedCount: number;
+}
+
+function fmt(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2 });
+}
+
+function getDefaults() {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 1);
+  return {
+    start: startOfYear.toISOString().slice(0, 10),
+    end: now.toISOString().slice(0, 10),
   };
-  createdAt: string;
 }
 
 export default function ReportsPage() {
-  const [reports, setReports] = useState<Report[]>([]);
-  const [name, setName] = useState("");
-  const [type, setType] = useState("monthly_pl");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const defaults = getDefaults();
+  const [startDate, setStartDate] = useState(defaults.start);
+  const [endDate, setEndDate] = useState(defaults.end);
+  const [data, setData] = useState<PLData | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  function fetchReports() {
-    fetch("/api/reports")
+  function fetchPL(start: string, end: string) {
+    setLoading(true);
+    fetch(`/api/reports/live?startDate=${start}&endDate=${end}`)
       .then((r) => r.json())
-      .then(setReports);
+      .then(setData)
+      .finally(() => setLoading(false));
   }
 
   useEffect(() => {
-    fetchReports();
-  }, []);
+    fetchPL(startDate, endDate);
+  }, [startDate, endDate]);
 
-  async function handleGenerate() {
-    if (!name || !startDate || !endDate) {
-      toast.error("Fill in all fields");
-      return;
+  function setQuickRange(label: string) {
+    const now = new Date();
+    let start: Date;
+    let end: Date = now;
+
+    switch (label) {
+      case "month":
+        start = new Date(now.getFullYear(), now.getMonth(), 1);
+        break;
+      case "quarter": {
+        const q = Math.floor(now.getMonth() / 3) * 3;
+        start = new Date(now.getFullYear(), q, 1);
+        break;
+      }
+      case "year":
+        start = new Date(now.getFullYear(), 0, 1);
+        break;
+      case "last-year":
+        start = new Date(now.getFullYear() - 1, 0, 1);
+        end = new Date(now.getFullYear() - 1, 11, 31);
+        break;
+      default:
+        return;
     }
 
-    setGenerating(true);
-    const res = await fetch("/api/reports/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        type,
-        periodStart: startDate,
-        periodEnd: endDate,
-      }),
-    });
-
-    if (res.ok) {
-      toast.success("Report generated");
-      setName("");
-      fetchReports();
-    } else {
-      toast.error("Failed to generate report");
-    }
-    setGenerating(false);
+    setStartDate(start.toISOString().slice(0, 10));
+    setEndDate(end.toISOString().slice(0, 10));
   }
 
-  async function handleExport(id: string, format: "xlsx" | "csv") {
-    const res = await fetch(`/api/reports/${id}/export?format=${format}`);
+  async function handleExport(format: "xlsx" | "csv") {
+    const res = await fetch(
+      `/api/reports/export?startDate=${startDate}&endDate=${endDate}&format=${format}`
+    );
     if (!res.ok) {
       toast.error("Export failed");
       return;
@@ -95,229 +113,285 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `report.${format}`;
+    a.download = `PL-${startDate}-to-${endDate}.${format}`;
     a.click();
     URL.revokeObjectURL(url);
+    toast.success("Downloaded");
   }
 
-  async function handleDelete(id: string) {
-    const res = await fetch(`/api/reports/${id}`, { method: "DELETE" });
+  async function handleShare() {
+    const res = await fetch("/api/share", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: `P&L ${startDate} to ${endDate}`,
+        expiresInDays: 30,
+      }),
+    });
+
     if (res.ok) {
-      toast.success("Report deleted");
-      if (selectedReport?.id === id) setSelectedReport(null);
-      fetchReports();
+      const share = await res.json();
+      const url = `${window.location.origin}/share/${share.token}`;
+      await navigator.clipboard.writeText(url);
+      toast.success("Share link copied to clipboard");
+    } else {
+      toast.error("Failed to create share link");
     }
   }
 
+  const incomeEntries = data
+    ? Object.entries(data.incomeByCategory).sort((a, b) => b[1] - a[1])
+    : [];
+  const cogsEntries = data
+    ? Object.entries(data.cogsByCategory).sort((a, b) => b[1] - a[1])
+    : [];
+  const expenseEntries = data
+    ? Object.entries(data.expenseByCategory).sort((a, b) => b[1] - a[1])
+    : [];
+  const hasCogs = cogsEntries.length > 0;
+
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Reports</h1>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Generate P&L Report</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-5">
-            <div className="space-y-2">
-              <Label>Report Name</Label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Q1 2026 P&L"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={type} onValueChange={(v) => v && setType(v)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="monthly_pl">Monthly</SelectItem>
-                  <SelectItem value="quarterly_pl">Quarterly</SelectItem>
-                  <SelectItem value="annual_pl">Annual</SelectItem>
-                  <SelectItem value="custom">Custom</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Start Date</Label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>End Date</Label>
-              <Input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
-            <div className="flex items-end">
-              <Button onClick={handleGenerate} disabled={generating}>
-                <BarChart3 className="mr-2 h-4 w-4" />
-                {generating ? "Generating..." : "Generate"}
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4">
-        {reports.map((report) => (
-          <Card
-            key={report.id}
-            className={`cursor-pointer transition-colors ${
-              selectedReport?.id === report.id ? "ring-2 ring-primary" : ""
-            }`}
-            onClick={() => setSelectedReport(report)}
-          >
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <div>
-                <CardTitle className="text-base">{report.name}</CardTitle>
-                <CardDescription>
-                  {new Date(report.periodStart).toLocaleDateString()} –{" "}
-                  {new Date(report.periodEnd).toLocaleDateString()} &middot;{" "}
-                  {report.data?.transactionCount ?? 0} transactions
-                </CardDescription>
+    <>
+      <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-(--header-height)">
+        <div className="flex w-full items-center gap-1 px-4 lg:gap-2 lg:px-6">
+          <SidebarTrigger className="-ml-1" />
+          <Separator
+            orientation="vertical"
+            className="mx-2 data-[orientation=vertical]:h-4"
+          />
+          <h1 className="text-base font-medium">P&L Report</h1>
+        </div>
+      </header>
+      <div className="flex flex-1 flex-col">
+        <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+          <Card>
+            <CardContent className="flex flex-wrap items-end gap-4">
+              <div className="space-y-2">
+                <Label>From</Label>
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
               </div>
+              <div className="space-y-2">
+                <Label>To</Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
+              <Separator
+                orientation="vertical"
+                className="data-[orientation=vertical]:h-10"
+              />
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExport(report.id, "xlsx");
-                  }}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Excel
+                <Button variant="outline" size="sm" onClick={() => setQuickRange("month")}>
+                  This Month
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleExport(report.id, "csv");
-                  }}
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  CSV
+                <Button variant="outline" size="sm" onClick={() => setQuickRange("quarter")}>
+                  This Quarter
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDelete(report.id);
-                  }}
-                >
-                  <Trash2 className="h-4 w-4" />
+                <Button variant="outline" size="sm" onClick={() => setQuickRange("year")}>
+                  This Year
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setQuickRange("last-year")}>
+                  Last Year
                 </Button>
               </div>
-            </CardHeader>
-            {selectedReport?.id === report.id && report.data && (
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-3 mb-6">
-                  <div className="rounded-md border p-4">
-                    <p className="text-sm text-muted-foreground">
-                      Total Income
-                    </p>
-                    <p className="text-xl font-bold text-green-600">
-                      $
-                      {report.data.totalIncome.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </p>
-                  </div>
-                  <div className="rounded-md border p-4">
-                    <p className="text-sm text-muted-foreground">
-                      Total Expenses
-                    </p>
-                    <p className="text-xl font-bold text-red-600">
-                      $
-                      {report.data.totalExpenses.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </p>
-                  </div>
-                  <div className="rounded-md border p-4">
-                    <p className="text-sm text-muted-foreground">Net Income</p>
-                    <p
-                      className={`text-xl font-bold ${
-                        report.data.netIncome >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
+            </CardContent>
+          </Card>
+
+          {loading ? (
+            <p className="text-muted-foreground">Loading...</p>
+          ) : data && data.transactionCount > 0 ? (
+            <>
+              {data.uncategorizedCount > 0 && (
+                <Card>
+                  <CardContent className="py-3">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Badge variant="destructive">{data.uncategorizedCount}</Badge>
+                      <span className="text-muted-foreground">
+                        uncategorized transactions — categorize them for an accurate P&L
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              <div className="grid grid-cols-1 gap-4 @xl:grid-cols-3">
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Total Income</CardDescription>
+                    <CardTitle className="text-2xl font-semibold tabular-nums text-green-600">
+                      ${fmt(data.totalIncome)}
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Total Expenses</CardDescription>
+                    <CardTitle className="text-2xl font-semibold tabular-nums text-red-600">
+                      ${fmt(data.totalCogs + data.totalExpenses)}
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+                <Card>
+                  <CardHeader>
+                    <CardDescription>Net Profit</CardDescription>
+                    <CardTitle
+                      className={`text-2xl font-semibold tabular-nums ${
+                        data.netProfit >= 0 ? "text-green-600" : "text-red-600"
                       }`}
                     >
-                      $
-                      {report.data.netIncome.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </p>
+                      ${fmt(data.netProfit)}
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+              </div>
+
+              {/* Income Section */}
+              {incomeEntries.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardDescription>Income</CardDescription>
+                      <span className="text-sm font-semibold tabular-nums text-green-600">
+                        ${fmt(data.totalIncome)}
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <Table>
+                    <TableBody>
+                      {incomeEntries.map(([cat, amt]) => (
+                        <TableRow key={cat}>
+                          <TableCell>{cat}</TableCell>
+                          <TableCell className="text-right tabular-nums text-green-600">
+                            ${fmt(amt)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+
+              {/* COGS Section (only if used) */}
+              {hasCogs && (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardDescription>Cost of Goods Sold</CardDescription>
+                        <span className="text-sm font-semibold tabular-nums text-red-600">
+                          ${fmt(data.totalCogs)}
+                        </span>
+                      </div>
+                    </CardHeader>
+                    <Table>
+                      <TableBody>
+                        {cogsEntries.map(([cat, amt]) => (
+                          <TableRow key={cat}>
+                            <TableCell>{cat}</TableCell>
+                            <TableCell className="text-right tabular-nums text-red-600">
+                              ${fmt(amt)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardDescription>Gross Profit</CardDescription>
+                        <CardTitle
+                          className={`text-xl font-semibold tabular-nums ${
+                            data.grossProfit >= 0 ? "text-green-600" : "text-red-600"
+                          }`}
+                        >
+                          ${fmt(data.grossProfit)}
+                        </CardTitle>
+                      </div>
+                    </CardHeader>
+                  </Card>
+                </>
+              )}
+
+              {/* Expenses Section */}
+              {expenseEntries.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardDescription>Expenses</CardDescription>
+                      <span className="text-sm font-semibold tabular-nums text-red-600">
+                        ${fmt(data.totalExpenses)}
+                      </span>
+                    </div>
+                  </CardHeader>
+                  <Table>
+                    <TableBody>
+                      {expenseEntries.map(([cat, amt]) => (
+                        <TableRow key={cat}>
+                          <TableCell>{cat}</TableCell>
+                          <TableCell className="text-right tabular-nums text-red-600">
+                            ${fmt(amt)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+
+              {/* Net Profit */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Net Profit</CardTitle>
+                    <CardTitle
+                      className={`text-2xl font-semibold tabular-nums ${
+                        data.netProfit >= 0 ? "text-green-600" : "text-red-600"
+                      }`}
+                    >
+                      ${fmt(data.netProfit)}
+                    </CardTitle>
                   </div>
-                </div>
+                  <CardDescription>
+                    {data.transactionCount} transactions
+                  </CardDescription>
+                </CardHeader>
+              </Card>
 
-                <div className="grid gap-6 md:grid-cols-2">
-                  {report.data.incomeByCategory &&
-                    Object.keys(report.data.incomeByCategory).length > 0 && (
-                      <div>
-                        <h3 className="font-medium mb-2">Income Breakdown</h3>
-                        <div className="space-y-1">
-                          {Object.entries(report.data.incomeByCategory).map(
-                            ([cat, amt]) => (
-                              <div
-                                key={cat}
-                                className="flex justify-between text-sm"
-                              >
-                                <span>{cat}</span>
-                                <span className="text-green-600">
-                                  $
-                                  {amt.toLocaleString("en-US", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                  {report.data.expenseByCategory &&
-                    Object.keys(report.data.expenseByCategory).length > 0 && (
-                      <div>
-                        <h3 className="font-medium mb-2">Expense Breakdown</h3>
-                        <div className="space-y-1">
-                          {Object.entries(report.data.expenseByCategory).map(
-                            ([cat, amt]) => (
-                              <div
-                                key={cat}
-                                className="flex justify-between text-sm"
-                              >
-                                <span>{cat}</span>
-                                <span className="text-red-600">
-                                  $
-                                  {amt.toLocaleString("en-US", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-                            )
-                          )}
-                        </div>
-                      </div>
-                    )}
-                </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => handleExport("xlsx")}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export Excel
+                </Button>
+                <Button variant="outline" onClick={() => handleExport("csv")}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export CSV
+                </Button>
+                <Button variant="outline" onClick={handleShare}>
+                  <Share2 className="mr-2 h-4 w-4" />
+                  Share with Accountant
+                </Button>
+              </div>
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-muted-foreground">
+                  No transactions in this date range. Upload statements to see
+                  your P&L.
+                </p>
               </CardContent>
-            )}
-          </Card>
-        ))}
+            </Card>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

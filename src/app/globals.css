@@ -127,4 +127,20 @@
   html {
     @apply font-sans;
   }
+  button,
+  a,
+  select,
+  [role="button"],
+  [role="menuitem"],
+  [role="option"],
+  [role="tab"],
+  [data-slot="sidebar-menu-button"],
+  [data-slot="dropdown-menu-trigger"],
+  [data-slot="dropdown-menu-item"],
+  [data-slot="select-trigger"],
+  [data-slot="tabs-trigger"],
+  [data-slot="collapsible-trigger"],
+  label[for] {
+    cursor: pointer;
+  }
 }

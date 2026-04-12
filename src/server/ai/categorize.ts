@@ -9,7 +9,11 @@ import {
   transactions,
 } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
-import { lookupGlobalVendor, recordGlobalVote } from "./global-vendors";
+import {
+  fetchGlobalPatterns,
+  matchGlobalVendor,
+  recordGlobalVote,
+} from "./global-vendors";
 
 interface TransactionInput {
   description: string;
@@ -67,9 +71,10 @@ export async function categorizeInMemory(
   if (needsGlobal.length === 0) return results;
 
   // Pass 2: Global vendor database (collective intelligence)
+  const globalPatterns = await fetchGlobalPatterns();
   const needsAi: TransactionInput[] = [];
   for (const txn of needsGlobal) {
-    const globalCategoryName = await lookupGlobalVendor(txn.description);
+    const globalCategoryName = matchGlobalVendor(txn.description, globalPatterns);
 
     if (globalCategoryName) {
       const category = userCategories.find(
@@ -90,63 +95,81 @@ export async function categorizeInMemory(
 
   if (needsAi.length === 0) return results;
 
-  // Pass 3: AI categorization in batches (fallback)
+  // Pass 3: AI categorization in parallel batches (fallback)
   console.log(`[categorize] ${needsAi.length} transactions need AI (${txns.length - needsAi.length} resolved by rules/global)`);
   const BATCH_SIZE = 30;
+  const MAX_CONCURRENT = 3;
+  const MAX_RETRIES = 2;
+
+  const batches: TransactionInput[][] = [];
   for (let i = 0; i < needsAi.length; i += BATCH_SIZE) {
-    const batch = needsAi.slice(i, i + BATCH_SIZE);
-    const txnData = batch.map((t) => ({
-      id: String(t.index),
-      description: t.description,
-    }));
+    batches.push(needsAi.slice(i, i + BATCH_SIZE));
+  }
 
-    console.log(
-      `[categorize] AI batch ${Math.floor(i / BATCH_SIZE) + 1}: ${batch.length} transactions`
-    );
+  // Process batches in groups of MAX_CONCURRENT
+  for (let g = 0; g < batches.length; g += MAX_CONCURRENT) {
+    const group = batches.slice(g, g + MAX_CONCURRENT);
+    const promises = group.map(async (batch, groupIdx) => {
+      const batchNum = g + groupIdx + 1;
+      const txnData = batch.map((t) => ({
+        id: String(t.index),
+        description: t.description,
+      }));
 
-    try {
-      const text = await callClaude(
-        [
-          {
-            role: "user",
-            content: `Categories: ${categoryNames.join(", ")}\n\nTransactions:\n${JSON.stringify(txnData)}`,
-          },
-        ],
-        {
-          system: CATEGORIZATION_SYSTEM_PROMPT,
-          maxTokens: 4096,
-          model: "claude-haiku-4-5-20251001",
+      console.log(`[categorize] AI batch ${batchNum}/${batches.length}: ${batch.length} transactions`);
+
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const text = await callClaude(
+            [
+              {
+                role: "user",
+                content: `Categories: ${categoryNames.join(", ")}\n\nTransactions:\n${JSON.stringify(txnData)}`,
+              },
+            ],
+            {
+              system: CATEGORIZATION_SYSTEM_PROMPT,
+              maxTokens: 4096,
+              model: "claude-haiku-4-5-20251001",
+            }
+          );
+
+          const parsed = parseCategorizeResponse(text);
+
+          for (const item of parsed) {
+            if (!item.categoryName) {
+              results.push({
+                index: parseInt(item.transactionId),
+                categoryId: null,
+                vendorName: item.vendorName || null,
+              });
+              continue;
+            }
+
+            const category = userCategories.find(
+              (c) => c.name.toLowerCase() === item.categoryName!.toLowerCase()
+            );
+
+            results.push({
+              index: parseInt(item.transactionId),
+              categoryId: category?.id ?? null,
+              vendorName: item.vendorName || null,
+            });
+          }
+          return; // Success — exit retry loop
+        } catch (err) {
+          if (attempt === MAX_RETRIES) {
+            console.error(`[categorize] Batch ${batchNum} failed after ${MAX_RETRIES + 1} attempts:`, err);
+            for (const t of batch) {
+              results.push({ index: t.index, categoryId: null, vendorName: null });
+            }
+          } else {
+            console.warn(`[categorize] Batch ${batchNum} attempt ${attempt + 1} failed, retrying...`);
+          }
         }
-      );
-
-      const parsed = parseCategorizeResponse(text);
-
-      for (const item of parsed) {
-        if (!item.categoryName) {
-          results.push({
-            index: parseInt(item.transactionId),
-            categoryId: null,
-            vendorName: item.vendorName || null,
-          });
-          continue;
-        }
-
-        const category = userCategories.find(
-          (c) => c.name.toLowerCase() === item.categoryName!.toLowerCase()
-        );
-
-        results.push({
-          index: parseInt(item.transactionId),
-          categoryId: category?.id ?? null,
-          vendorName: item.vendorName || null,
-        });
       }
-    } catch (err) {
-      console.error("[categorize] Batch failed:", err);
-      for (const t of batch) {
-        results.push({ index: t.index, categoryId: null, vendorName: null });
-      }
-    }
+    });
+    await Promise.all(promises);
   }
 
   return results;

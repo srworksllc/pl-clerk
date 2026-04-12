@@ -83,7 +83,12 @@ export default function UploadPage() {
           () => fetchStatements()
         );
       } else {
-        toast.error(`Failed to upload ${file.name}`);
+        const error = await res.json().catch(() => null);
+        if (res.status === 409) {
+          toast.error(`${file.name} has already been uploaded`);
+        } else {
+          toast.error(error?.error ?? `Failed to upload ${file.name}`);
+        }
       }
     }
     setUploading(false);
@@ -188,12 +193,10 @@ export default function UploadPage() {
         </div>
       </header>
       <div className="flex flex-1 flex-col">
-      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+      <div className="mx-auto w-full max-w-5xl flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
         <div
-          className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12 transition-colors ${
-            dragging
-              ? "border-primary bg-primary/5"
-              : "border-muted-foreground/25"
+          className={`flex justify-center rounded-lg border border-dashed px-6 py-10 transition-colors ${
+            dragging ? "border-primary bg-primary/5" : "border-border"
           }`}
           onDragOver={(e) => {
             e.preventDefault();
@@ -202,35 +205,32 @@ export default function UploadPage() {
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
         >
-          <Upload className="mb-4 h-10 w-10 text-muted-foreground" />
-          <p className="mb-1 text-sm font-medium">
-            Drop PDF files here or click to browse
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Bank statements and credit card statements
-          </p>
-          <Button
-            className="mt-4"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {uploading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          <div className="text-center">
+            <Upload className="mx-auto size-12 text-muted-foreground/50" />
+            <div className="mt-4 flex text-sm text-muted-foreground">
+              <label className="relative cursor-pointer font-semibold text-primary hover:text-primary/80">
+                <span>Upload a file</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  multiple
+                  className="sr-only"
+                  onChange={handleFileChange}
+                />
+              </label>
+              <p className="pl-1">or drag and drop</p>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              PDF bank and credit card statements
+            </p>
+            {uploading && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Uploading...
-              </>
-            ) : (
-              "Choose Files"
+              </div>
             )}
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf"
-            multiple
-            className="hidden"
-            onChange={handleFileChange}
-          />
+          </div>
         </div>
 
         {statements.length > 0 && (

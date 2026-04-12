@@ -88,7 +88,7 @@ export default function SharedViewPage() {
           <Card>
             <CardHeader>
               <CardDescription>Total Income</CardDescription>
-              <CardTitle className="text-2xl font-semibold tabular-nums text-green-600">
+              <CardTitle className="text-2xl font-semibold tabular-nums text-foreground">
                 ${totalIncome.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </CardTitle>
             </CardHeader>
@@ -96,7 +96,7 @@ export default function SharedViewPage() {
           <Card>
             <CardHeader>
               <CardDescription>Total Expenses</CardDescription>
-              <CardTitle className="text-2xl font-semibold tabular-nums text-red-600">
+              <CardTitle className="text-2xl font-semibold tabular-nums text-muted-foreground">
                 ${totalExpenses.toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </CardTitle>
             </CardHeader>
@@ -104,7 +104,7 @@ export default function SharedViewPage() {
           <Card>
             <CardHeader>
               <CardDescription>Net Income</CardDescription>
-              <CardTitle className={`text-2xl font-semibold tabular-nums ${totalIncome - totalExpenses >= 0 ? "text-green-600" : "text-red-600"}`}>
+              <CardTitle className={`text-2xl font-semibold tabular-nums ${totalIncome - totalExpenses >= 0 ? "text-foreground" : "text-muted-foreground"}`}>
                 ${(totalIncome - totalExpenses).toLocaleString("en-US", { minimumFractionDigits: 2 })}
               </CardTitle>
             </CardHeader>
@@ -140,7 +140,7 @@ export default function SharedViewPage() {
                     <TableCell>{txn.category?.name ?? "Uncategorized"}</TableCell>
                     <TableCell
                       className={`text-right font-medium tabular-nums ${
-                        txn.type === "income" ? "text-green-600" : "text-red-600"
+                        txn.type === "income" ? "text-foreground" : "text-muted-foreground"
                       }`}
                     >
                       {txn.type === "income" ? "+" : "-"}$

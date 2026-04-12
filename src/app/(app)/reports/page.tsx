@@ -12,14 +12,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Download, Share2 } from "lucide-react";
@@ -163,7 +155,7 @@ export default function ReportsPage() {
         </div>
       </header>
       <div className="flex flex-1 flex-col">
-        <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+        <div className="mx-auto w-full max-w-5xl flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
           <Card>
             <CardContent className="flex flex-wrap items-end gap-4">
               <div className="space-y-2">
@@ -220,11 +212,11 @@ export default function ReportsPage() {
                 </Card>
               )}
 
-              <div className="grid grid-cols-1 gap-4 @xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <Card>
                   <CardHeader>
                     <CardDescription>Total Income</CardDescription>
-                    <CardTitle className="text-2xl font-semibold tabular-nums text-green-600">
+                    <CardTitle className="text-2xl font-semibold tabular-nums">
                       ${fmt(data.totalIncome)}
                     </CardTitle>
                   </CardHeader>
@@ -232,7 +224,7 @@ export default function ReportsPage() {
                 <Card>
                   <CardHeader>
                     <CardDescription>Total Expenses</CardDescription>
-                    <CardTitle className="text-2xl font-semibold tabular-nums text-red-600">
+                    <CardTitle className="text-2xl font-semibold tabular-nums">
                       ${fmt(data.totalCogs + data.totalExpenses)}
                     </CardTitle>
                   </CardHeader>
@@ -242,10 +234,10 @@ export default function ReportsPage() {
                     <CardDescription>Net Profit</CardDescription>
                     <CardTitle
                       className={`text-2xl font-semibold tabular-nums ${
-                        data.netProfit >= 0 ? "text-green-600" : "text-red-600"
+                        data.netProfit < 0 ? "text-destructive" : ""
                       }`}
                     >
-                      ${fmt(data.netProfit)}
+                      {data.netProfit < 0 ? "-" : ""}${fmt(Math.abs(data.netProfit))}
                     </CardTitle>
                   </CardHeader>
                 </Card>
@@ -257,23 +249,21 @@ export default function ReportsPage() {
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardDescription>Income</CardDescription>
-                      <span className="text-sm font-semibold tabular-nums text-green-600">
+                      <span className="text-sm font-semibold tabular-nums">
                         ${fmt(data.totalIncome)}
                       </span>
                     </div>
                   </CardHeader>
-                  <Table>
-                    <TableBody>
+                  <CardContent>
+                    <div className="space-y-2">
                       {incomeEntries.map(([cat, amt]) => (
-                        <TableRow key={cat}>
-                          <TableCell>{cat}</TableCell>
-                          <TableCell className="text-right tabular-nums text-green-600">
-                            ${fmt(amt)}
-                          </TableCell>
-                        </TableRow>
+                        <div key={cat} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">{cat}</span>
+                          <span className="tabular-nums">${fmt(amt)}</span>
+                        </div>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  </CardContent>
                 </Card>
               )}
 
@@ -284,34 +274,28 @@ export default function ReportsPage() {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <CardDescription>Cost of Goods Sold</CardDescription>
-                        <span className="text-sm font-semibold tabular-nums text-red-600">
+                        <span className="text-sm font-semibold tabular-nums">
                           ${fmt(data.totalCogs)}
                         </span>
                       </div>
                     </CardHeader>
-                    <Table>
-                      <TableBody>
+                    <CardContent>
+                      <div className="space-y-2">
                         {cogsEntries.map(([cat, amt]) => (
-                          <TableRow key={cat}>
-                            <TableCell>{cat}</TableCell>
-                            <TableCell className="text-right tabular-nums text-red-600">
-                              ${fmt(amt)}
-                            </TableCell>
-                          </TableRow>
+                          <div key={cat} className="flex items-center justify-between text-sm">
+                            <span className="text-muted-foreground">{cat}</span>
+                            <span className="tabular-nums">${fmt(amt)}</span>
+                          </div>
                         ))}
-                      </TableBody>
-                    </Table>
+                      </div>
+                    </CardContent>
                   </Card>
 
                   <Card>
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <CardDescription>Gross Profit</CardDescription>
-                        <CardTitle
-                          className={`text-xl font-semibold tabular-nums ${
-                            data.grossProfit >= 0 ? "text-green-600" : "text-red-600"
-                          }`}
-                        >
+                        <CardTitle className="text-xl font-semibold tabular-nums">
                           ${fmt(data.grossProfit)}
                         </CardTitle>
                       </div>
@@ -326,23 +310,21 @@ export default function ReportsPage() {
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardDescription>Expenses</CardDescription>
-                      <span className="text-sm font-semibold tabular-nums text-red-600">
+                      <span className="text-sm font-semibold tabular-nums">
                         ${fmt(data.totalExpenses)}
                       </span>
                     </div>
                   </CardHeader>
-                  <Table>
-                    <TableBody>
+                  <CardContent>
+                    <div className="space-y-2">
                       {expenseEntries.map(([cat, amt]) => (
-                        <TableRow key={cat}>
-                          <TableCell>{cat}</TableCell>
-                          <TableCell className="text-right tabular-nums text-red-600">
-                            ${fmt(amt)}
-                          </TableCell>
-                        </TableRow>
+                        <div key={cat} className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground">{cat}</span>
+                          <span className="tabular-nums">${fmt(amt)}</span>
+                        </div>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </div>
+                  </CardContent>
                 </Card>
               )}
 
@@ -353,10 +335,10 @@ export default function ReportsPage() {
                     <CardTitle>Net Profit</CardTitle>
                     <CardTitle
                       className={`text-2xl font-semibold tabular-nums ${
-                        data.netProfit >= 0 ? "text-green-600" : "text-red-600"
+                        data.netProfit < 0 ? "text-destructive" : ""
                       }`}
                     >
-                      ${fmt(data.netProfit)}
+                      {data.netProfit < 0 ? "-" : ""}${fmt(Math.abs(data.netProfit))}
                     </CardTitle>
                   </div>
                   <CardDescription>

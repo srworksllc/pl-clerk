@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Card,
+  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -27,12 +28,6 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 interface Category {
@@ -210,7 +205,7 @@ export default function TransactionsPage() {
         </TableCell>
         <TableCell
           className={`text-right font-medium tabular-nums whitespace-nowrap ${
-            txn.type === "income" ? "text-green-600" : "text-red-600"
+            txn.type === "income" ? "" : "text-muted-foreground"
           }`}
         >
           {txn.type === "income" ? "+" : "-"}${fmt(parseFloat(txn.amount))}
@@ -240,7 +235,7 @@ export default function TransactionsPage() {
         </div>
       </header>
       <div className="flex flex-1 flex-col">
-        <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+        <div className="mx-auto w-full max-w-5xl flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
           {loading ? (
             <p className="text-muted-foreground">Loading...</p>
           ) : (
@@ -265,22 +260,24 @@ export default function TransactionsPage() {
                       <CardDescription>No transactions found.</CardDescription>
                     </CardHeader>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Description</TableHead>
-                          <TableHead>Vendor</TableHead>
-                          <TableHead>Category</TableHead>
-                          <TableHead className="text-right">Amount</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filtered.map((txn) => (
-                          <TransactionRow key={txn.id} txn={txn} />
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <CardContent className="p-0">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Description</TableHead>
+                            <TableHead>Vendor</TableHead>
+                            <TableHead>Category</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filtered.map((txn) => (
+                            <TransactionRow key={txn.id} txn={txn} />
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
                   )}
                 </Card>
               </TabsContent>
@@ -298,75 +295,47 @@ export default function TransactionsPage() {
                   ) : (
                     <>
                       {/* Vendors with multiple transactions — batch categorize */}
-                      {multiVendors.map((group) => (
-                        <Card key={group.name}>
-                          <Collapsible>
-                            <CardHeader>
-                              <div className="flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-2">
-                                  <CollapsibleTrigger className="flex items-center gap-2">
-                                    <ChevronRight className="h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-90" />
-                                  </CollapsibleTrigger>
-                                  <div>
-                                    <CardTitle className="text-base">
-                                      {group.name}
-                                    </CardTitle>
-                                    <CardDescription>
-                                      {group.transactions.length} transactions
-                                      &middot; ${fmt(group.total)}
-                                    </CardDescription>
-                                  </div>
-                                </div>
-                                <Select
-                                  onValueChange={(val) =>
-                                    val &&
-                                    handleBatchCategorize(group.name, val)
-                                  }
-                                >
-                                  <SelectTrigger className="w-[220px]">
-                                    <SelectValue placeholder="Categorize all as..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {categories.map((cat) => (
-                                      <SelectItem key={cat.id} value={cat.id}>
-                                        {cat.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </CardHeader>
-                            <CollapsibleContent>
-                              <Table>
-                                <TableBody>
-                                  {group.transactions.map((txn) => (
-                                    <TableRow key={txn.id}>
-                                      <TableCell className="whitespace-nowrap">
-                                        {new Date(
-                                          txn.date
-                                        ).toLocaleDateString()}
-                                      </TableCell>
-                                      <TableCell className="truncate">
-                                        {txn.description}
-                                      </TableCell>
-                                      <TableCell
-                                        className={`text-right tabular-nums whitespace-nowrap ${
-                                          txn.type === "income"
-                                            ? "text-green-600"
-                                            : "text-red-600"
-                                        }`}
-                                      >
-                                        {txn.type === "income" ? "+" : "-"}$
-                                        {fmt(parseFloat(txn.amount))}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </CollapsibleContent>
-                          </Collapsible>
-                        </Card>
-                      ))}
+                      <Card>
+                        <CardContent className="p-0">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Vendor</TableHead>
+                                <TableHead className="text-right">Transactions</TableHead>
+                                <TableHead className="text-right">Total</TableHead>
+                                <TableHead className="text-right">Category</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {multiVendors.map((group) => (
+                                <TableRow key={group.name}>
+                                  <TableCell className="font-medium">{group.name}</TableCell>
+                                  <TableCell className="text-right tabular-nums">{group.transactions.length}</TableCell>
+                                  <TableCell className="text-right tabular-nums">${fmt(group.total)}</TableCell>
+                                  <TableCell className="text-right">
+                                    <Select
+                                      onValueChange={(val) =>
+                                        val && handleBatchCategorize(group.name, val)
+                                      }
+                                    >
+                                      <SelectTrigger className="ml-auto w-[200px]">
+                                        <SelectValue placeholder="Categorize all as..." />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {categories.map((cat) => (
+                                          <SelectItem key={cat.id} value={cat.id}>
+                                            {cat.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </CardContent>
+                      </Card>
 
                       {/* One-off transactions — individual categorize */}
                       {oneOffs.length > 0 && (
@@ -380,62 +349,64 @@ export default function TransactionsPage() {
                               vendor
                             </CardDescription>
                           </CardHeader>
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Date</TableHead>
-                                <TableHead>Description</TableHead>
-                                <TableHead>Category</TableHead>
-                                <TableHead className="text-right">
-                                  Amount
-                                </TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {oneOffs.map((txn) => (
-                                <TableRow key={txn.id}>
-                                  <TableCell className="whitespace-nowrap">
-                                    {new Date(txn.date).toLocaleDateString()}
-                                  </TableCell>
-                                  <TableCell className="truncate">
-                                    {txn.description}
-                                  </TableCell>
-                                  <TableCell>
-                                    <Select
-                                      onValueChange={(val) =>
-                                        val &&
-                                        handleCategoryChange(txn.id, val)
-                                      }
-                                    >
-                                      <SelectTrigger>
-                                        <SelectValue placeholder="Select category" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {categories.map((cat) => (
-                                          <SelectItem
-                                            key={cat.id}
-                                            value={cat.id}
-                                          >
-                                            {cat.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                  <TableCell
-                                    className={`text-right tabular-nums whitespace-nowrap ${
-                                      txn.type === "income"
-                                        ? "text-green-600"
-                                        : "text-red-600"
-                                    }`}
-                                  >
-                                    {txn.type === "income" ? "+" : "-"}$
-                                    {fmt(parseFloat(txn.amount))}
-                                  </TableCell>
+                          <CardContent className="p-0">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Date</TableHead>
+                                  <TableHead>Description</TableHead>
+                                  <TableHead>Category</TableHead>
+                                  <TableHead className="text-right">
+                                    Amount
+                                  </TableHead>
                                 </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
+                              </TableHeader>
+                              <TableBody>
+                                {oneOffs.map((txn) => (
+                                  <TableRow key={txn.id}>
+                                    <TableCell className="whitespace-nowrap">
+                                      {new Date(txn.date).toLocaleDateString()}
+                                    </TableCell>
+                                    <TableCell className="truncate">
+                                      {txn.description}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Select
+                                        onValueChange={(val) =>
+                                          val &&
+                                          handleCategoryChange(txn.id, val)
+                                        }
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="Select category" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {categories.map((cat) => (
+                                            <SelectItem
+                                              key={cat.id}
+                                              value={cat.id}
+                                            >
+                                              {cat.name}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </TableCell>
+                                    <TableCell
+                                      className={`text-right tabular-nums whitespace-nowrap ${
+                                        txn.type === "income"
+                                          ? ""
+                                          : "text-muted-foreground"
+                                      }`}
+                                    >
+                                      {txn.type === "income" ? "+" : "-"}$
+                                      {fmt(parseFloat(txn.amount))}
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </CardContent>
                         </Card>
                       )}
                     </>
@@ -453,7 +424,7 @@ export default function TransactionsPage() {
                             {group.name}
                           </CardTitle>
                           <div className="flex items-center gap-4 text-sm tabular-nums">
-                            <span className="text-red-600">
+                            <span className="text-muted-foreground">
                               ${fmt(group.total)}
                             </span>
                             <Badge variant="secondary">

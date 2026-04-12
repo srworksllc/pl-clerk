@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { globalVendorCategories } from "@/db/schema";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { desc, sql } from "drizzle-orm";
 
 const MIN_VOTES = 5;
 const MIN_CONFIDENCE = 0.8;
@@ -15,24 +15,71 @@ function normalizeVendor(name: string): string {
     .trim();
 }
 
-// Look up a vendor in the global database
+export type GlobalPatternRow = {
+  vendorPattern: string;
+  categoryName: string;
+  voteCount: number;
+};
+
+// Fetch all global patterns (call once, pass to matchGlobalVendor per txn)
+export async function fetchGlobalPatterns(): Promise<GlobalPatternRow[]> {
+  try {
+    return await db
+      .select({
+        vendorPattern: globalVendorCategories.vendorPattern,
+        categoryName: globalVendorCategories.categoryName,
+        voteCount: globalVendorCategories.voteCount,
+      })
+      .from(globalVendorCategories)
+      .orderBy(desc(globalVendorCategories.voteCount));
+  } catch (err) {
+    console.error("[global-vendors] Failed to fetch patterns:", err);
+    return [];
+  }
+}
+
+// Match a transaction description against pre-fetched global patterns
 // Returns the category name if confidence is high enough, null otherwise
-export async function lookupGlobalVendor(
-  vendorName: string
-): Promise<string | null> {
-  const pattern = normalizeVendor(vendorName);
-  if (!pattern || pattern.length < 3) return null;
+export function matchGlobalVendor(
+  description: string,
+  allPatterns: GlobalPatternRow[]
+): string | null {
+  const normalized = normalizeVendor(description);
+  if (!normalized || normalized.length < 3) return null;
+  if (allPatterns.length === 0) return null;
 
-  const rows = await db
-    .select()
-    .from(globalVendorCategories)
-    .where(eq(globalVendorCategories.vendorPattern, pattern))
-    .orderBy(desc(globalVendorCategories.voteCount));
+  // Group by vendor pattern, only keep those that match within the description
+  const matchedByVendor = new Map<
+    string,
+    { categoryName: string; voteCount: number }[]
+  >();
 
-  if (rows.length === 0) return null;
+  for (const row of allPatterns) {
+    if (normalized.includes(row.vendorPattern)) {
+      const existing = matchedByVendor.get(row.vendorPattern) ?? [];
+      existing.push({
+        categoryName: row.categoryName,
+        voteCount: row.voteCount,
+      });
+      matchedByVendor.set(row.vendorPattern, existing);
+    }
+  }
 
+  if (matchedByVendor.size === 0) return null;
+
+  // Pick the longest matching pattern (most specific)
+  let bestPattern = "";
+  for (const pattern of matchedByVendor.keys()) {
+    if (pattern.length > bestPattern.length) {
+      bestPattern = pattern;
+    }
+  }
+
+  const rows = matchedByVendor.get(bestPattern)!;
   const totalVotes = rows.reduce((sum, r) => sum + r.voteCount, 0);
-  const topCategory = rows[0];
+  const topCategory = rows.reduce((best, r) =>
+    r.voteCount > best.voteCount ? r : best
+  );
 
   // Need enough votes and strong agreement
   if (totalVotes < MIN_VOTES) return null;
@@ -40,6 +87,7 @@ export async function lookupGlobalVendor(
 
   return topCategory.categoryName;
 }
+
 
 // Record a vote — called when a user categorizes a transaction
 export async function recordGlobalVote(
@@ -49,38 +97,27 @@ export async function recordGlobalVote(
   const pattern = normalizeVendor(vendorName);
   if (!pattern || pattern.length < 3) return;
 
-  await db
-    .insert(globalVendorCategories)
-    .values({
-      vendorPattern: pattern,
-      categoryName,
-      voteCount: 1,
-      lastVotedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [
-        globalVendorCategories.vendorPattern,
-        globalVendorCategories.categoryName,
-      ],
-      set: {
-        voteCount: sql`${globalVendorCategories.voteCount} + 1`,
+  try {
+    await db
+      .insert(globalVendorCategories)
+      .values({
+        vendorPattern: pattern,
+        categoryName,
+        voteCount: 1,
         lastVotedAt: new Date(),
-      },
-    });
-}
-
-// Batch lookup for multiple vendors at once
-export async function lookupGlobalVendors(
-  vendorNames: string[]
-): Promise<Map<string, string>> {
-  const results = new Map<string, string>();
-
-  for (const name of vendorNames) {
-    const category = await lookupGlobalVendor(name);
-    if (category) {
-      results.set(name, category);
-    }
+      })
+      .onConflictDoUpdate({
+        target: [
+          globalVendorCategories.vendorPattern,
+          globalVendorCategories.categoryName,
+        ],
+        set: {
+          voteCount: sql`${globalVendorCategories.voteCount} + 1`,
+          lastVotedAt: new Date(),
+        },
+      });
+  } catch (err) {
+    console.error("[global-vendors] Failed to record vote:", err);
   }
-
-  return results;
 }
+

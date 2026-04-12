@@ -125,7 +125,7 @@ export default function SettingsPage() {
         </div>
       </header>
       <div className="flex flex-1 flex-col">
-      <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
+      <div className="mx-auto w-full max-w-5xl flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
         <Tabs defaultValue="categories">
           <TabsList>
             <TabsTrigger value="categories">Categories</TabsTrigger>
@@ -186,7 +186,7 @@ export default function SettingsPage() {
                     {expenseCategories.map((cat) => (
                       <div
                         key={cat.id}
-                        className="flex items-center justify-between rounded-lg bg-muted/10 p-2.5"
+                        className="flex items-center justify-between rounded-lg border p-2.5"
                       >
                         <span className="text-sm">{cat.name}</span>
                         <Button
@@ -214,7 +214,7 @@ export default function SettingsPage() {
                     {incomeCategories.map((cat) => (
                       <div
                         key={cat.id}
-                        className="flex items-center justify-between rounded-lg bg-muted/10 p-2.5"
+                        className="flex items-center justify-between rounded-lg border p-2.5"
                       >
                         <span className="text-sm">{cat.name}</span>
                         <Button
@@ -270,7 +270,7 @@ export default function SettingsPage() {
                       {shares.map((share) => (
                         <div
                           key={share.id}
-                          className="flex items-center justify-between rounded-lg bg-muted/10 p-3"
+                          className="flex items-center justify-between rounded-lg border p-3"
                         >
                           <div>
                             <p className="text-sm font-medium">

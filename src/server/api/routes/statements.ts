@@ -1,10 +1,13 @@
 import { Hono } from "hono";
 import { db } from "@/db";
 import { statements, transactions } from "@/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { saveFile, deleteFile } from "@/server/storage/local";
 import { extractPagesFromPdf } from "@/lib/pdf";
-import { extractTransactionsFromPages } from "@/server/ai/extract-transactions";
+import {
+  extractTransactionsFromPages,
+  type ExtractedTransaction,
+} from "@/server/ai/extract-transactions";
 import { categorizeInMemory, createVendorRules } from "@/server/ai/categorize";
 
 type Env = { Variables: { userId: string } };
@@ -29,6 +32,24 @@ export const statementsRoute = new Hono<Env>()
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Duplicate detection — check if we already have a statement with the same
+    // filename and file size from this user
+    const existing = await db.query.statements.findFirst({
+      where: and(
+        eq(statements.userId, userId),
+        eq(statements.fileName, file.name),
+        eq(statements.fileSize, buffer.length)
+      ),
+    });
+
+    if (existing) {
+      return c.json(
+        { error: "This statement has already been uploaded" },
+        409
+      );
+    }
+
     const filePath = await saveFile(userId, file.name, buffer);
 
     const [row] = await db
@@ -97,13 +118,39 @@ export const statementsRoute = new Hono<Env>()
       .set({ status: "processing" })
       .where(eq(statements.id, id));
 
-    // Process in background — don't block the response
     processStatement(userId, id, row.filePath).catch((err) => {
       console.error("[process] Background processing failed:", err);
     });
 
     return c.json({ success: true });
   });
+
+// Deduplicate transactions by date + amount + description similarity
+function deduplicateTransactions(
+  txns: ExtractedTransaction[]
+): ExtractedTransaction[] {
+  const seen = new Set<string>();
+  const deduped: ExtractedTransaction[] = [];
+
+  for (const txn of txns) {
+    // Key: date + amount + first 20 chars of description (normalized)
+    const key = [
+      txn.date.toISOString().slice(0, 10),
+      txn.amount.toFixed(2),
+      txn.type,
+      txn.description.toUpperCase().replace(/\s+/g, " ").slice(0, 20),
+    ].join("|");
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      deduped.push(txn);
+    } else {
+      console.log(`[dedup] Removed duplicate: ${txn.description} $${txn.amount}`);
+    }
+  }
+
+  return deduped;
+}
 
 async function processStatement(
   userId: string,
@@ -128,32 +175,41 @@ async function processStatement(
       throw new Error("No readable content found in PDF");
     }
 
-    // Step 2: Extract transactions
+    // Step 2: Extract transactions (parallel, with retry)
     await setStep("extracting");
-    const extracted = await extractTransactionsFromPages(pages);
-    console.log("[process] Total extracted:", extracted.length, "transactions");
+    let extracted = await extractTransactionsFromPages(pages);
+    console.log("[process] Raw extracted:", extracted.length, "transactions");
+
+    // Deduplicate (catches page boundary duplicates)
+    extracted = deduplicateTransactions(extracted);
+    console.log("[process] After dedup:", extracted.length, "transactions");
 
     if (extracted.length === 0) {
       throw new Error("No transactions found in statement");
     }
 
-    // Step 3: Match vendors
+    // Step 3: Match vendors + categorize (parallel batches, with retry)
     await setStep("matching");
     const inputs = extracted.map((t, i) => ({
       description: t.description,
       index: i,
     }));
 
-    // Step 4: Categorize
     await setStep("categorizing");
     const categoryResults = await categorizeInMemory(userId, inputs);
 
-    const catMap = new Map<number, { categoryId: string | null; vendorName: string | null }>();
+    const catMap = new Map<
+      number,
+      { categoryId: string | null; vendorName: string | null }
+    >();
     for (const r of categoryResults) {
-      catMap.set(r.index, { categoryId: r.categoryId, vendorName: r.vendorName });
+      catMap.set(r.index, {
+        categoryId: r.categoryId,
+        vendorName: r.vendorName,
+      });
     }
 
-    // Step 5: Save everything atomically
+    // Step 4: Save everything atomically
     await setStep("saving");
     extracted.sort((a, b) => a.date.getTime() - b.date.getTime());
 
@@ -193,7 +249,13 @@ async function processStatement(
       })
       .where(eq(statements.id, statementId));
 
-    console.log("[process] Done!", statementId, ":", extracted.length, "transactions");
+    console.log(
+      "[process] Done!",
+      statementId,
+      ":",
+      extracted.length,
+      "transactions"
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Processing failed";
     console.error("[process] Error:", message);

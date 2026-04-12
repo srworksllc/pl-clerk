@@ -3,10 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Table,
@@ -182,10 +180,10 @@ export default function TransactionsPage() {
         <TableCell className="whitespace-nowrap">
           {new Date(txn.date).toLocaleDateString()}
         </TableCell>
-        <TableCell className="max-w-[200px] truncate">
+        <TableCell className="max-w-[300px] truncate">
           {txn.description}
         </TableCell>
-        <TableCell>{txn.vendor?.name ?? "—"}</TableCell>
+        <TableCell className="max-w-[150px] truncate">{txn.vendor?.name ?? "—"}</TableCell>
         <TableCell>
           <Select
             value={txn.categoryId ?? ""}
@@ -254,32 +252,30 @@ export default function TransactionsPage() {
               </TabsList>
 
               <TabsContent value="all">
-                <Card>
-                  {filtered.length === 0 ? (
+                {filtered.length === 0 ? (
+                  <Card>
                     <CardHeader>
                       <CardDescription>No transactions found.</CardDescription>
                     </CardHeader>
-                  ) : (
-                    <CardContent className="p-0">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Date</TableHead>
-                            <TableHead>Description</TableHead>
-                            <TableHead>Vendor</TableHead>
-                            <TableHead>Category</TableHead>
-                            <TableHead className="text-right">Amount</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filtered.map((txn) => (
-                            <TransactionRow key={txn.id} txn={txn} />
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </CardContent>
-                  )}
-                </Card>
+                  </Card>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Description</TableHead>
+                        <TableHead>Vendor</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map((txn) => (
+                        <TransactionRow key={txn.id} txn={txn} />
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
               </TabsContent>
 
               <TabsContent value="uncategorized">
@@ -295,62 +291,53 @@ export default function TransactionsPage() {
                   ) : (
                     <>
                       {/* Vendors with multiple transactions — batch categorize */}
-                      <Card>
-                        <CardContent className="p-0">
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Vendor</TableHead>
-                                <TableHead className="text-right">Transactions</TableHead>
-                                <TableHead className="text-right">Total</TableHead>
-                                <TableHead className="text-right">Category</TableHead>
+                      {multiVendors.length > 0 && (
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Vendor</TableHead>
+                              <TableHead className="text-right">Transactions</TableHead>
+                              <TableHead className="text-right">Total</TableHead>
+                              <TableHead className="text-right">Category</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {multiVendors.map((group) => (
+                              <TableRow key={group.name}>
+                                <TableCell className="font-medium">{group.name}</TableCell>
+                                <TableCell className="text-right tabular-nums">{group.transactions.length}</TableCell>
+                                <TableCell className="text-right tabular-nums">${fmt(group.total)}</TableCell>
+                                <TableCell className="text-right">
+                                  <Select
+                                    onValueChange={(val) =>
+                                      val && handleBatchCategorize(group.name, val)
+                                    }
+                                  >
+                                    <SelectTrigger className="ml-auto w-[200px]">
+                                      <SelectValue placeholder="Categorize all as..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {categories.map((cat) => (
+                                        <SelectItem key={cat.id} value={cat.id}>
+                                          {cat.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </TableCell>
                               </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {multiVendors.map((group) => (
-                                <TableRow key={group.name}>
-                                  <TableCell className="font-medium">{group.name}</TableCell>
-                                  <TableCell className="text-right tabular-nums">{group.transactions.length}</TableCell>
-                                  <TableCell className="text-right tabular-nums">${fmt(group.total)}</TableCell>
-                                  <TableCell className="text-right">
-                                    <Select
-                                      onValueChange={(val) =>
-                                        val && handleBatchCategorize(group.name, val)
-                                      }
-                                    >
-                                      <SelectTrigger className="ml-auto w-[200px]">
-                                        <SelectValue placeholder="Categorize all as..." />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {categories.map((cat) => (
-                                          <SelectItem key={cat.id} value={cat.id}>
-                                            {cat.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        </CardContent>
-                      </Card>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      )}
 
                       {/* One-off transactions — individual categorize */}
                       {oneOffs.length > 0 && (
-                        <Card>
-                          <CardHeader>
-                            <CardTitle className="text-base">
-                              One-off transactions
-                            </CardTitle>
-                            <CardDescription>
-                              {oneOffs.length} transactions without a recurring
-                              vendor
-                            </CardDescription>
-                          </CardHeader>
-                          <CardContent className="p-0">
-                            <Table>
+                        <div>
+                          <h3 className="mb-4 text-sm font-medium text-muted-foreground">
+                            One-off transactions ({oneOffs.length})
+                          </h3>
+                          <Table>
                               <TableHeader>
                                 <TableRow>
                                   <TableHead>Date</TableHead>
@@ -367,7 +354,7 @@ export default function TransactionsPage() {
                                     <TableCell className="whitespace-nowrap">
                                       {new Date(txn.date).toLocaleDateString()}
                                     </TableCell>
-                                    <TableCell className="truncate">
+                                    <TableCell className="max-w-[400px] truncate">
                                       {txn.description}
                                     </TableCell>
                                     <TableCell>
@@ -406,8 +393,7 @@ export default function TransactionsPage() {
                                 ))}
                               </TableBody>
                             </Table>
-                          </CardContent>
-                        </Card>
+                        </div>
                       )}
                     </>
                   )}
@@ -415,27 +401,24 @@ export default function TransactionsPage() {
               </TabsContent>
 
               <TabsContent value="vendors">
-                <div className="space-y-4">
-                  {allVendorGroups.map((group) => (
-                    <Card key={group.name}>
-                      <CardHeader>
-                        <div className="flex items-center justify-between">
-                          <CardTitle className="text-base">
-                            {group.name}
-                          </CardTitle>
-                          <div className="flex items-center gap-4 text-sm tabular-nums">
-                            <span className="text-muted-foreground">
-                              ${fmt(group.total)}
-                            </span>
-                            <Badge variant="secondary">
-                              {group.transactions.length}
-                            </Badge>
-                          </div>
-                        </div>
-                      </CardHeader>
-                    </Card>
-                  ))}
-                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Vendor</TableHead>
+                      <TableHead className="text-right">Transactions</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {allVendorGroups.map((group) => (
+                      <TableRow key={group.name}>
+                        <TableCell className="font-medium">{group.name}</TableCell>
+                        <TableCell className="text-right tabular-nums">{group.transactions.length}</TableCell>
+                        <TableCell className="text-right tabular-nums">${fmt(group.total)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </TabsContent>
             </Tabs>
           )}

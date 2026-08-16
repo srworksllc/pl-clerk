@@ -6,7 +6,7 @@
 |----------|-------|
 | **Name** | P&L Clerk |
 | **Repo** | `srworksllc/pl-clerk` |
-| **Path** | `/Users/stephenreinhardt/Sites/pl-clerk` |
+| **Path** | `/Users/stephenreinhardt/Sites/srworks/pl-clerk` |
 | **Domain** | `app.plclerk.net` |
 | **Server** | `5.78.77.83` (Hetzner, Debian 13) |
 | **Purpose** | AI-powered bookkeeping for any SMB — upload statements, get P&L |
